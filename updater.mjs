@@ -13,7 +13,8 @@ async function fetchLotto(drawNo) {
     data.drwtNo3,
     data.drwtNo4,
     data.drwtNo5,
-    data.drwtNo6
+    data.drwtNo6,
+    data.bnusNo
   ];
 }
 
