@@ -1,8 +1,6 @@
 name: Update Lotto Recent Numbers
 
 on:
-  schedule:
-    - cron: "20 12 * * SAT" 
   workflow_dispatch:
 
 jobs:
@@ -13,18 +11,18 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Install Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: "18"
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install node-fetch@2
 
       - name: Run updater
+        run: node updater.js
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_NAMESPACE_ID: ${{ secrets.CF_NAMESPACE_ID }}
-          KV_KEY: "recent_numbers"
-        run: node updater.js
