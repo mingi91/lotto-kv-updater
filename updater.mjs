@@ -19,7 +19,7 @@ async function fetchLotto(drawNo) {
 }
 
 async function main() {
-  const latest = 1200; // 자동화하면 여기도 API로 최신값 불러올 수 있음
+  const latest = 1200;
   const weeks = 4;
 
   const result = [];
@@ -30,8 +30,12 @@ async function main() {
     result.push(nums);
   }
 
+  // ⭐ KST 기준 타임스탬프 생성
+  const nowKST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const timestamp = nowKST.toISOString().replace("Z", "+09:00");
+
   const payload = {
-    timestamp: new Date().toISOString(),
+    timestamp,       // ← 한국시간
     weeks,
     recent_numbers: result
   };
