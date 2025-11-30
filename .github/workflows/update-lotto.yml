@@ -23,7 +23,7 @@ jobs:
           npm install node-fetch@2
 
       - name: Run updater
-        run: node updater.js
+        run: node updater.mjs
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
