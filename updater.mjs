@@ -24,7 +24,7 @@ async function main() {
   const result = [];
 
   for (let i = 0; i < weeks; i++) {
-    const draw = latest - i * 5;
+    const draw = latest - i;
     const nums = await fetchLotto(draw);
     result.push(nums);
   }
