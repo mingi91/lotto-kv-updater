@@ -1,65 +1,52 @@
 import fetch from "node-fetch";
 
-const CF_API_TOKEN = process.env.CF_API_TOKEN;
-const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
-const CF_NAMESPACE_ID = process.env.CF_NAMESPACE_ID;
-
-async function fetchLatestDraw() {
-  const api = "https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=0";
-  const res = await fetch(api);
+async function fetchLotto(drawNo) {
+  const url = `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${drawNo}`;
+  const res = await fetch(url);
   const data = await res.json();
-  return data.drwNo;
-}
 
-async function fetchDrawNumbers(drawNo) {
-  const api = `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${drawNo}`;
-  const res = await fetch(api);
-  const data = await res.json();
+  if (!data || data.returnValue !== "success") return null;
+
   return [
     data.drwtNo1,
     data.drwtNo2,
     data.drwtNo3,
     data.drwtNo4,
     data.drwtNo5,
-    data.drwtNo6,
-    data.bnusNo
+    data.drwtNo6
   ];
 }
 
-async function run() {
-  const latest = await fetchLatestDraw();
+async function main() {
+  const latest = 1200; // 자동화하면 여기도 API로 최신값 불러올 수 있음
   const weeks = 4;
 
-  const tasks = [];
+  const result = [];
+
   for (let i = 0; i < weeks; i++) {
-    tasks.push(fetchDrawNumbers(latest - i));
+    const draw = latest - i * 5;
+    const nums = await fetchLotto(draw);
+    result.push(nums);
   }
 
-  const results = await Promise.all(tasks);
-
-  const nums = new Set();
-  results.forEach(arr => arr.forEach(n => nums.add(n)));
-
-  const body = {
+  const payload = {
     timestamp: new Date().toISOString(),
-    latest_draw: latest,
     weeks,
-    recent_numbers: [...nums],
+    recent_numbers: result
   };
 
-  await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_NAMESPACE_ID}/values/recent_numbers`,
-    {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${CF_API_TOKEN}`,
-      },
-      body: JSON.stringify(body),
-    }
-  );
+  console.log("SAVE:", payload);
 
-  console.log("DONE");
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${process.env.CF_NAMESPACE_ID}/values/recent_numbers`;
+
+  await fetch(endpoint, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Bearer ${process.env.CF_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 }
 
-run();
+main();
