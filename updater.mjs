@@ -20,7 +20,7 @@ async function fetchLotto(drawNo) {
 
 async function main() {
   const latest = 1200;
-  const weeks = 4;
+  const weeks = 10;
 
   const result = [];
 
