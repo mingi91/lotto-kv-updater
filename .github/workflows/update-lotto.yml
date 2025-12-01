@@ -2,7 +2,9 @@ name: Update Lotto Recent Numbers
 
 on:
   schedule:
-    - cron: "20 12 * * SAT"   # 매주 토요일 21:20 KST
+    - cron: "20 12 * * 6"   # 토 21:20 KST
+    - cron: "0 22 * * 6"    # 일 07:00 KST (UTC 토 22시)
+    - cron: "0 2 * * 0"     # 일 11:00 KST (UTC 일 02시)
   workflow_dispatch:
 
 jobs:
@@ -19,8 +21,7 @@ jobs:
           node-version: "18"
 
       - name: Install dependencies
-        run: |
-          npm install node-fetch@2
+        run: npm install node-fetch@2
 
       - name: Run updater
         run: node updater.mjs
