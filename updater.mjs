@@ -1,53 +1,41 @@
 import fetch from "node-fetch";
 
-/* ---------------------------------------------
- * 1) 최신 회차 감지 — 가장 안정적인 3단계 구조 (9999 → main → fallback)
- * --------------------------------------------- */
+/* ------------------------------------------------------
+ * 1) 최신 회차 자동 탐지 (가장 안정적인 방식)
+ *    - 1190~1300까지 순회하며 success 반환된 가장 큰 회차를 최신으로 판단
+ *    - HTML 파싱 필요 없음
+ *    - 환경 차단 영향 없음
+ * ------------------------------------------------------ */
 async function fetchLatestRound() {
-  // (1) 9999 방식 (가장 안정적)
-  try {
-    const res = await fetch(
-      "https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=9999"
-    );
-    const json = await res.json();
+  console.log("[LATEST] Searching latest round...");
 
-    if (json.returnValue === "success" && json.drwNo > 0) {
-      console.log(`[LATEST] via 9999 → ${json.drwNo}`);
-      return json.drwNo;
+  let latest = 0;
+
+  for (let round = 1190; round < 1300; round++) {
+    try {
+      const res = await fetch(
+        `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${round}`
+      );
+      const json = await res.json();
+
+      if (json.returnValue === "success") {
+        latest = round; // 성공할 때마다 업데이트
+      } else {
+        break; // 실패한 지점에서 종료
+      }
+    } catch (e) {
+      console.log(`[ERROR] Fetch round ${round} failed`);
+      break;
     }
-  } catch (e) {
-    console.log("[LATEST] 9999 error:", e);
   }
 
-  // (2) 메인 페이지 fallback
-  try {
-    const res = await fetch(
-      "https://www.dhlottery.co.kr/common.do?method=main"
-    );
-    const text = await res.text();
-    const match = text.match(/"drwNo":"(\d+)"/);
-
-    if (match) {
-      const latest = parseInt(match[1]);
-      console.log(`[LATEST] via main page → ${latest}`);
-      return latest;
-    }
-  } catch (e) {
-    console.log("[LATEST] main page error:", e);
-  }
-
-  // (3) 날짜 기반 회차 예측 fallback
-  const start = new Date("2002-12-07");
-  const now = new Date();
-  const weeks = Math.floor((now - start) / (1000 * 60 * 60 * 24 * 7));
-  const guess = weeks + 1;
-  console.log(`[LATEST] FINAL fallback guess → ${guess}`);
-  return guess;
+  console.log(`[LATEST] FINAL detected latest round = ${latest}`);
+  return latest;
 }
 
-/* ---------------------------------------------
- * 2) 특정 회차 번호 가져오기 (재시도 3회)
- * --------------------------------------------- */
+/* ------------------------------------------------------
+ * 2) 개별 회차 번호 가져오기 (재시도 포함)
+ * ------------------------------------------------------ */
 async function fetchRoundNumbers(round) {
   const url = `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${round}`;
 
@@ -69,9 +57,9 @@ async function fetchRoundNumbers(round) {
         ];
       }
 
-      console.log(`[ROUND] ${round} not ready (attempt ${i})`);
+      console.log(`[ROUND] ${round} not ready yet (attempt ${i})`);
     } catch (e) {
-      console.log(`[ROUND] ${round} fetch error (attempt ${i}):`, e);
+      console.log(`[ROUND] ${round} fetch error attempt ${i}:`, e);
     }
 
     await new Promise((r) => setTimeout(r, 1000));
@@ -81,22 +69,28 @@ async function fetchRoundNumbers(round) {
   return null;
 }
 
-/* ---------------------------------------------
+/* ------------------------------------------------------
  * 3) MAIN
- * --------------------------------------------- */
+ * ------------------------------------------------------ */
 async function main() {
   const latest = await fetchLatestRound();
-  console.log("[MAIN] Latest round:", latest);
 
-  const weeks = 10;
+  if (!latest || latest < 1000) {
+    console.log("❌ Invalid latest round detected");
+    process.exit(1);
+  }
+
+  console.log(`[MAIN] Latest round = ${latest}`);
+
   const out = [];
+  const weeks = 10;
 
   for (let i = 0; i < weeks; i++) {
     const round = latest - i;
     const nums = await fetchRoundNumbers(round);
 
     if (!nums) {
-      console.log(`[MAIN] ${round} unavailable → stop`);
+      console.log(`[MAIN] Stop at round ${round}`);
       break;
     }
 
@@ -104,11 +98,11 @@ async function main() {
   }
 
   if (out.length === 0) {
-    console.log("❌ No valid numbers fetched. Exit.");
+    console.log("❌ No valid rounds fetched");
     process.exit(1);
   }
 
-  // timestamp (KST)
+  // Timestamp (KST)
   const timestamp = new Date(Date.now() + 9 * 3600 * 1000)
     .toISOString()
     .replace("Z", "+09:00");
@@ -119,7 +113,9 @@ async function main() {
     recent_numbers: out,
   };
 
-  // KV 업데이트
+  /* ------------------------------------------------------
+   * 4) Cloudflare KV 업데이트
+   * ------------------------------------------------------ */
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${process.env.CF_NAMESPACE_ID}/values/recent_numbers`;
 
   const resp = await fetch(endpoint, {
@@ -138,19 +134,21 @@ async function main() {
 
   console.log("✅ KV UPDATE SUCCESS");
 
-  // GET 검증
+  /* ------------------------------------------------------
+   * 5) 업데이트 후 GET 검증
+   * ------------------------------------------------------ */
   try {
-    const check = await fetch("https://lotto-recent.gjmg91.workers.dev/recent");
-    const json = await check.json();
+    const res = await fetch("https://lotto-recent.gjmg91.workers.dev/recent");
+    const json = await res.json();
 
     if (!json.recent_numbers || json.recent_numbers.length === 0) {
       console.log("❌ GET VERIFY FAIL");
       process.exit(1);
     }
 
-    console.log("✅ GET VERIFY OK:", json.timestamp);
+    console.log("✅ GET VERIFY SUCCESS:", json.timestamp);
   } catch (e) {
-    console.log("❌ GET VERIFY ERR:", e);
+    console.log("❌ GET VERIFY ERROR:", e);
     process.exit(1);
   }
 
