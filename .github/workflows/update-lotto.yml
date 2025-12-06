@@ -2,9 +2,15 @@ name: Update Lotto Recent Numbers
 
 on:
   schedule:
-    - cron: "20 12 * * 6"   # 토 21:20 KST
-    - cron: "0 22 * * 6"    # 일 07:00 KST (UTC 토 22시)
-    - cron: "0 2 * * 0"     # 일 11:00 KST (UTC 일 02시)
+    # 토요일 밤 23:30 KST → UTC 토요일 14:30
+    - cron: "30 14 * * 6"
+
+    # 일요일 아침 07:30 KST → UTC 토요일 22:30
+    - cron: "30 22 * * 6"
+
+    # 일요일 오전 10:00 KST → UTC 일요일 01:00
+    - cron: "0 1 * * 0"
+
   workflow_dispatch:
 
 jobs:
