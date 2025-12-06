@@ -2,20 +2,15 @@ name: Update Lotto Recent Numbers
 
 on:
   schedule:
-    # 토요일 밤 23:30 KST → UTC 토요일 14:30
-    - cron: "30 14 * * 6"
-
-    # 일요일 아침 07:30 KST → UTC 토요일 22:30
-    - cron: "30 22 * * 6"
-
-    # 일요일 오전 10:00 KST → UTC 일요일 01:00
-    - cron: "0 1 * * 0"
-
+    - cron: "30 14 * * 6"   # 토 23:30 KST
+    - cron: "45 22 * * 6"   # 일 07:45 KST  ← 수정됨
+    - cron: "0 1 * * 0"     # 일 10:00 KST
   workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    retries: 2   # 실패 시 자동 2회 재시도
 
     steps:
       - name: Checkout Repo
@@ -26,10 +21,10 @@ jobs:
         with:
           node-version: "18"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: npm install node-fetch@2
 
-      - name: Run updater
+      - name: Run Updater
         run: node updater.mjs
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
