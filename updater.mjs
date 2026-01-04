@@ -59,7 +59,6 @@ async function kvPutJson(payload) {
 
 /* ======================================================
  * 신규 API에서 데이터 가져오기
- *  - list 길이는 보장 안 됨 (1개일 수도 있음)
  * ====================================================== */
 async function fetchFromNewApi() {
   const res = await fetch(LOTTO_API, FETCH_OPTIONS);
@@ -84,36 +83,32 @@ async function fetchFromNewApi() {
 }
 
 /* ======================================================
- * 핵심: 10회차 100% 보장 정규화 로직
+ * 핵심: round 기준 10회차 정규화 (밀림 보장)
  * ====================================================== */
 function normalizeRecentRounds({
   latestRound,
-  apiItems,       // 신규 API에서 온 데이터 (0~N개)
-  previousNumbers // KV에 저장돼 있던 recent_numbers
+  apiItems,        // [{ round, numbers }]
+  previousItems,   // [{ round, numbers }]
 }) {
   const map = new Map();
 
-  // 1) 신규 API 데이터 우선 반영
+  // 1) 신규 API 데이터 (최우선)
   for (const item of apiItems) {
     map.set(item.round, item.numbers);
   }
 
-  // 2) 기존 KV 데이터로 부족분 채우기
-  if (Array.isArray(previousNumbers)) {
-    for (let i = 0; i < previousNumbers.length; i++) {
-      const round = latestRound - i;
-      if (!map.has(round)) {
-        map.set(round, previousNumbers[i]);
-      }
+  // 2) 기존 KV 데이터 (round 기준)
+  for (const item of previousItems) {
+    if (!map.has(item.round)) {
+      map.set(item.round, item.numbers);
     }
   }
 
-  // 3) 최신 → 과거 순으로 LIMIT개 확정
+  // 3) 최신 → 과거 순으로 정확히 LIMIT개
   const result = [];
-  for (let i = 0; i < LIMIT; i++) {
-    const round = latestRound - i;
-    if (map.has(round)) {
-      result.push(map.get(round));
+  for (let r = latestRound; r > latestRound - LIMIT; r--) {
+    if (map.has(r)) {
+      result.push({ round: r, numbers: map.get(r) });
     }
   }
 
@@ -124,47 +119,58 @@ function normalizeRecentRounds({
  * MAIN
  * ====================================================== */
 async function main() {
-  console.log("[MAIN] Fetching lotto data...");
+  console.log("[MAIN] Start updater (round-aware)");
 
   // 1) 기존 KV 읽기
   const prev = await kvGetJson();
-  const prevNumbers = prev?.recent_numbers ?? [];
+
+  /**
+   * 🔄 마이그레이션 처리
+   * - 이전 구조: recent_numbers: [[...]]
+   * - 신규 구조: recent_items: [{ round, numbers }]
+   */
+  let previousItems = [];
+  let previousLatestRound = prev?.latest_round;
+
+  if (Array.isArray(prev?.recent_items)) {
+    // 이미 신규 구조
+    previousItems = prev.recent_items;
+  } else if (Array.isArray(prev?.recent_numbers) && previousLatestRound) {
+    // 구 구조 → 신규 구조로 변환 (1회)
+    previousItems = prev.recent_numbers.map((nums, idx) => ({
+      round: previousLatestRound - idx,
+      numbers: nums,
+    }));
+    console.log("🔄 Migrated legacy KV structure → round-aware");
+  }
 
   // 2) 신규 API 호출
   const apiItems = await fetchFromNewApi();
 
-  if (apiItems.length === 0 && prevNumbers.length === 0) {
-    console.warn("⚠️ No data from API and no previous KV. Abort safely.");
+  if (apiItems.length === 0 && previousItems.length === 0) {
+    console.warn("⚠️ No data source available. Abort safely.");
     return;
   }
 
   // 3) 최신 회차 결정
-  //    - 신규 API가 주면 그중 최대
-  //    - 아니면 기존 KV 기준
   const latestRound =
     apiItems.length > 0
       ? Math.max(...apiItems.map((i) => i.round))
-      : prev?.latest_round;
+      : previousLatestRound;
 
   if (!latestRound) {
-    console.warn("⚠️ Cannot determine latest round. Abort safely.");
+    console.warn("⚠️ Cannot determine latest round. Abort.");
     return;
   }
 
-  // 4) 10회차 보장 정규화
-  const recentNumbers = normalizeRecentRounds({
+  // 4) round 기준 정규화 (정확한 밀림)
+  const normalized = normalizeRecentRounds({
     latestRound,
     apiItems,
-    previousNumbers: prevNumbers,
+    previousItems,
   });
 
-  if (recentNumbers.length < LIMIT) {
-    console.warn(
-      `⚠️ Only ${recentNumbers.length} rounds available (expected ${LIMIT})`
-    );
-  }
-
-  // 5) Payload 구성
+  // 5) Flutter 호환 payload 구성
   const timestamp = new Date(Date.now() + 9 * 3600 * 1000)
     .toISOString()
     .replace("Z", "+09:00");
@@ -172,20 +178,22 @@ async function main() {
   const payload = {
     timestamp,
     latest_round: latestRound,
-    weeks: recentNumbers.length, // Flutter는 이 값 사용
-    recent_numbers: recentNumbers,
+    weeks: normalized.length,
+    // ✅ Flutter가 쓰는 필드 (기존과 동일)
+    recent_numbers: normalized.map((i) => i.numbers),
+    // 🔒 내부 안정성용 (Flutter 미사용)
+    recent_items: normalized,
   };
 
   // 6) KV 업데이트
   const ok = await kvPutJson(payload);
   if (ok) {
-    console.log("✅ KV UPDATE SUCCESS");
     console.log(
-      `✅ latest_round=${latestRound}, weeks=${payload.weeks}`
+      `✅ KV UPDATE SUCCESS (latest_round=${latestRound}, weeks=${payload.weeks})`
     );
   }
 
-  console.log("🎉 ALL DONE (FUNCTIONALLY IDENTICAL)");
+  console.log("🎉 ALL DONE (ROUND-SAFE, SHIFT-CORRECT)");
 }
 
 main().catch((e) => {
